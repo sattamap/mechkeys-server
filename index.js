@@ -40,49 +40,46 @@ async function run() {
       }
     });
 
+    // Endpoint to get all products with search, filters, and sorting
+    app.get('/api/products', async (req, res) => {
+      try {
+        const { search, brand, minPrice, maxPrice, sort } = req.query;
 
-// Endpoint to get all products with search, filters, and sorting
-app.get('/api/products', async (req, res) => {
-  try {
-    const { search, brand, minPrice, maxPrice, sort } = req.query;
-    
-    let query = {};
-    
-    if (search) {
-      query.name = { $regex: search, $options: 'i' }; // case-insensitive search
-    }
-    
-    if (brand) {
-      query.brand = { $regex: brand, $options: 'i' };
-    }
-    
-    if (minPrice || maxPrice) {
-      query.price = {};
-      if (minPrice) query.price.$gte = parseFloat(minPrice);
-      if (maxPrice) query.price.$lte = parseFloat(maxPrice);
-    }
-    
-    let sortOption = {};
-    if (sort === 'priceLowToHigh') {
-      sortOption.price = 1;
-    } else if (sort === 'priceHighToLow') {
-      sortOption.price = -1;
-    }
+        let query = {};
 
-    const products = await productsCollection.find(query).sort(sortOption).toArray();
-    const productsWithStockStatus = products.map(product => ({
-      ...product,
-      stock: product.quantity > 0 ? 'In Stock' : 'Out of Stock'
-    }));
+        if (search) {
+          query.name = { $regex: search, $options: 'i' }; // case-insensitive search
+        }
 
-    res.json(productsWithStockStatus);
-  } catch (error) {
-    console.error('Failed to get products:', error);
-    res.status(500).json({ message: 'Failed to get products', error });
-  }
-});
+        if (brand) {
+          query.brand = { $regex: brand, $options: 'i' };
+        }
 
+        if (minPrice || maxPrice) {
+          query.price = {};
+          if (minPrice) query.price.$gte = parseFloat(minPrice);
+          if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+        }
 
+        let sortOption = {};
+        if (sort === 'priceLowToHigh') {
+          sortOption.price = 1;
+        } else if (sort === 'priceHighToLow') {
+          sortOption.price = -1;
+        }
+
+        const products = await productsCollection.find(query).sort(sortOption).toArray();
+        const productsWithStockStatus = products.map(product => ({
+          ...product,
+          stock: product.quantity > 0 ? 'In Stock' : 'Out of Stock'
+        }));
+
+        res.json(productsWithStockStatus);
+      } catch (error) {
+        console.error('Failed to get products:', error);
+        res.status(500).json({ message: 'Failed to get products', error });
+      }
+    });
 
     // Endpoint to get a product by ID
     app.get('/api/product/:id', async (req, res) => {
@@ -97,6 +94,44 @@ app.get('/api/products', async (req, res) => {
       } catch (error) {
         console.error('Failed to get product:', error);
         res.status(500).json({ message: 'Failed to get product', error });
+      }
+    });
+
+    // Endpoint to update a product
+    app.patch('/api/products/:id', async (req, res) => {
+      try {
+        const productId = req.params.id;
+        console.log(productId);
+        const updatedProduct = req.body;
+        console.log(updatedProduct);
+        const result = await productsCollection.updateOne(
+          { _id: new ObjectId(productId) },
+          { $set: updatedProduct }
+        );
+        if (result.matchedCount > 0) {
+          res.json(result);
+        } else {
+          res.status(404).json({ message: 'Product not found' });
+        }
+      } catch (error) {
+        console.error('Failed to update product:', error);
+        res.status(500).json({ message: 'Failed to update product', error });
+      }
+    });
+
+    // Endpoint to delete a product
+    app.delete('/api/products/:id', async (req, res) => {
+      try {
+        const productId = req.params.id;
+        const result = await productsCollection.deleteOne({ _id: new ObjectId(productId) });
+        if (result.deletedCount === 1) {
+          res.json({ productId });
+        } else {
+          res.status(404).json({ message: 'Product not found' });
+        }
+      } catch (error) {
+        console.error('Failed to delete product:', error);
+        res.status(500).json({ message: 'Failed to delete product', error });
       }
     });
 
@@ -176,7 +211,7 @@ app.get('/api/products', async (req, res) => {
             }
           }
         ]).toArray();
-    
+
         res.json(cartItems);
       } catch (error) {
         console.error('Failed to get cart items:', error);
@@ -184,98 +219,90 @@ app.get('/api/products', async (req, res) => {
       }
     });
 
+    // Update item quantity
+    app.patch('/api/carts/:productId', async (req, res) => {
+      const { productId } = req.params;
+      const { quantity } = req.body;
 
+      try {
+        console.log(`Received request to update cart item. Product ID: ${productId}, Quantity: ${quantity}`);
 
-   // Update item quantity
-app.patch('/api/carts/:productId', async (req, res) => {
-  const { productId } = req.params;
-  const { quantity } = req.body;
+        // Validate the quantity
+        const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
+        if (!product) {
+          console.log('Product not found');
+          return res.status(404).json({ error: 'Product not found' });
+        }
+        if (quantity > product.quantity) {
+          console.log('Quantity exceeds available stock');
+          return res.status(400).json({ error: 'Quantity exceeds available stock' });
+        }
 
-  try {
-    console.log(`Received request to update cart item. Product ID: ${productId}, Quantity: ${quantity}`);
+        // Update the cart item
+        const cartItem = await cartsCollection.findOneAndUpdate(
+          { productId: productId },
+          { $set: { quantity } },
+          { returnOriginal: false }
+        );
+        if (!cartItem) {
+          console.log('Cart item not found');
+          return res.status(404).json({ error: 'Cart item not found' });
+        }
 
-    // Validate the quantity
-    const product = await productsCollection.findOne({ _id: new ObjectId(productId) });
-    if (!product) {
-      console.log('Product not found');
-      return res.status(404).json({ error: 'Product not found' });
-    }
-    if (quantity > product.quantity) {
-      console.log('Quantity exceeds available stock');
-      return res.status(400).json({ error: 'Quantity exceeds available stock' });
-    }
+        console.log('Cart item updated successfully', cartItem);
+        res.json(cartItem);
+      } catch (error) {
+        console.error('Error updating cart item:', error.message);
+        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+      }
+    });
 
-    // Update the cart item
-    const cartItem = await cartsCollection.findOneAndUpdate(
-      { productId: productId },
-      { $set: { quantity } },
-      { returnOriginal: false }
-    );
-    if (!cartItem) {
-      console.log('Cart item not found');
-      return res.status(404).json({ error: 'Cart item not found' });
-    }
+    // Remove item from cart
+    app.delete('/api/carts/:productId', async (req, res) => {
+      const { productId } = req.params;
 
-    console.log('Cart item updated successfully', cartItem);
-    res.json(cartItem);
-  } catch (error) {
-    console.error('Error updating cart item:', error.message);
-    res.status(500).json({ error: 'Internal Server Error', details: error.message });
-  }
-});
+      try {
+        const result = await cartsCollection.deleteOne({ productId });
 
-    
-    
-// Remove item from cart
-app.delete('/api/carts/:productId', async (req, res) => {
-  const { productId } = req.params;
+        if (result.deletedCount === 1) {
+          res.json({ productId });
+        } else {
+          res.status(404).json({ message: 'Item not found' });
+        }
+      } catch (error) {
+        res.status(500).json({ message: 'Failed to remove cart item', error });
+      }
+    });
 
-  try {
-    const result = await cartsCollection.deleteOne({ productId });
+    // Endpoint to place an order
+    app.post('/api/orders', async (req, res) => {
+      try {
+        const { name, email, phone, address, paymentMethod, totalPrice } = req.body;
 
-    if (result.deletedCount === 1) {
-      res.json({ productId });
-    } else {
-      res.status(404).json({ message: 'Item not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to remove cart item', error });
-  }
-});
+        // Example validation
+        if (!name || !email || !phone || !address || !paymentMethod || !totalPrice) {
+          return res.status(400).json({ message: 'All fields are required' });
+        }
 
+        // Simulate saving to database
+        const order = {
+          name,
+          email,
+          phone,
+          address,
+          paymentMethod,
+          totalPrice,
+          createdAt: new Date(),
+        };
 
-// Endpoint to place an order
-app.post('/api/orders', async (req, res) => {
-  try {
-    const { name, email, phone, address, paymentMethod, totalPrice } = req.body;
+        const result = await ordersCollection.insertOne(order);
+        res.status(201).json(result.ops[0]); // Return the inserted document
 
-    // Example validation
-    if (!name || !email || !phone || !address || !paymentMethod || !totalPrice) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-
-    // Simulate saving to database
-    const order = {
-      name,
-      email,
-      phone,
-      address,
-      paymentMethod,
-      totalPrice,
-      createdAt: new Date(),
-    };
-
-    const result = await ordersCollection.insertOne(order);
-    res.status(201).json(result.ops[0]); // Return the inserted document
-
-  } catch (error) {
-    console.error('Failed to place order:', error);
-    res.status(500).json({ message: 'Failed to place order', error });
-  }
-});
-
-    
-
+      } catch (error) {
+        console.error('Failed to place order:', error);
+        res.status(500).json({ message: 'Failed to place order', error });
+      }
+    });
 
     app.get('/', (req, res) => {
       res.send('Server is running');
