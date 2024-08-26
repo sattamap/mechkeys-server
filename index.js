@@ -101,9 +101,7 @@ async function run() {
     app.patch('/api/products/:id', async (req, res) => {
       try {
         const productId = req.params.id;
-        console.log(productId);
         const updatedProduct = req.body;
-        console.log(updatedProduct);
         const result = await productsCollection.updateOne(
           { _id: new ObjectId(productId) },
           { $set: updatedProduct }
@@ -277,14 +275,31 @@ async function run() {
     // Endpoint to place an order
     app.post('/api/orders', async (req, res) => {
       try {
-        const { name, email, phone, address, paymentMethod, totalPrice } = req.body;
-
+        const { name, email, phone, address, paymentMethod, totalPrice, items } = req.body;
         // Example validation
-        if (!name || !email || !phone || !address || !paymentMethod || !totalPrice) {
+        if (!name || !email || !phone || !address || !paymentMethod || !totalPrice || !items) {
           return res.status(400).json({ message: 'All fields are required' });
         }
 
-        // Simulate saving to database
+        // Deduct stock for each item
+        for (const item of items) {
+          const product = await productsCollection.findOne({ _id: new ObjectId(item.productId)});
+
+          if (!product) {
+            return res.status(404).json({ message: `Product not found: ${item.productId}` });
+          }
+
+          if (product.quantity < item.quantity) {
+            return res.status(400).json({ message: `Not enough stock for product: ${product.name}` });
+          }
+
+          await productsCollection.updateOne(
+            { _id: new ObjectId(item.productId) },
+            { $inc: { quantity: -item.quantity } }
+          );
+        }
+
+        // Save order to the database
         const order = {
           name,
           email,
@@ -292,11 +307,12 @@ async function run() {
           address,
           paymentMethod,
           totalPrice,
+          items,
           createdAt: new Date(),
         };
 
         const result = await ordersCollection.insertOne(order);
-        res.status(201).json(result.ops[0]); // Return the inserted document
+        res.status(201).json(result.insertedId); // Return the inserted document
 
       } catch (error) {
         console.error('Failed to place order:', error);
